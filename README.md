@@ -1,12 +1,17 @@
-# Claude Citation Proof
+# Claude Code Citation Proof
 
-Deterministic proof for web citations, plus a small Claude Code hook layer that
-holds an agent accountable for sources it actually opened.
+Citation accountability built specifically for Claude Code. It uses Claude
+Code's hook lifecycle to track web sources, verify verbatim quotes, and warn or
+block when an answer relies on sources it did not properly cite.
 
-The core proof builder is model-agnostic: any model, agent, script, or CI job can
-give it a URL and a verbatim quote. The automatic source detection and Stop-time
-enforcement are Claude Code-specific because they use Claude Code's hook events
-and transcript payload.
+> **Platform scope:** the automatic installation and enforcement in this
+> repository are for Claude Code. The underlying `cite_proof.py` engine can be
+> called by other software, but GPT, Codex, and other agent hosts need their own
+> integration adapter; this repository does not automatically install into them.
+
+The proof builder itself accepts a URL and verbatim quote without calling a
+model. Claude Code supplies the automatic source detection and Stop-time
+enforcement through its `PostToolUse` and `Stop` hook events.
 
 ## What it does
 
@@ -60,7 +65,7 @@ New-Item -ItemType File -Force .proof/BLOCK | Out-Null
 You can also set `CITATION_PROOF_MODE=warn` or `CITATION_PROOF_MODE=block`.
 The environment variable takes precedence over `.proof/BLOCK`.
 
-## Install
+## Install in Claude Code
 
 Python 3.10 or newer is required. The deterministic HTTP/HTML lane uses the
 standard library. Optional features need extra tools:
