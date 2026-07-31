@@ -6,8 +6,11 @@ block when an answer relies on sources it did not properly cite.
 
 > **Platform scope:** the automatic installation and enforcement in this
 > repository are for Claude Code. The underlying `cite_proof.py` engine can be
-> called by other software, but GPT, Codex, and other agent hosts need their own
-> integration adapter; this repository does not automatically install into them.
+> called by other software. GPT, Codex, and other agent hosts can adapt it with
+> small helper/adapters that translate their tool-use and final-response events
+> into the same source ledger and proof-gate inputs. Those helpers are not
+> included yet, so this repository does not automatically install into those
+> platforms.
 
 The proof builder itself accepts a URL and verbatim quote without calling a
 model. Claude Code supplies the automatic source detection and Stop-time
