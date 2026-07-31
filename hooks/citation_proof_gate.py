@@ -35,6 +35,42 @@ _TEXT_FRAGMENT = "#:~:text="
 _SRC_RE = re.compile(r"^\s*Src:\s*(\S.*?)\s*$")
 _QUOTE_RE = re.compile(r"^\s*Quote:\s*(\S.*?)\s*$")
 _HTTP_RE = re.compile(r"https?://")
+_GIT_EXCLUDE_ENTRY = ".proof/"
+_GIT_EXCLUDE_COMMENT = "# Citation Proof local evidence (generated; do not commit)"
+
+
+def ensure_local_git_exclude(project_dir: Path) -> bool:
+    """Best-effort local Git protection without editing tracked .gitignore."""
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(project_dir), "rev-parse", "--git-common-dir"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=3,
+            check=False,
+            shell=False,
+        )
+        common = result.stdout.strip()
+        if result.returncode != 0 or not common:
+            return False
+        common_dir = Path(common)
+        if not common_dir.is_absolute():
+            common_dir = (project_dir / common_dir).resolve()
+        exclude = common_dir / "info" / "exclude"
+        existing = exclude.read_text(encoding="utf-8") if exclude.exists() else ""
+        if _GIT_EXCLUDE_ENTRY in {line.strip() for line in existing.splitlines()}:
+            return True
+        exclude.parent.mkdir(parents=True, exist_ok=True)
+        separator = "" if not existing or existing.endswith(("\n", "\r")) else "\n"
+        with exclude.open("a", encoding="utf-8") as handle:
+            handle.write(
+                f"{separator}{_GIT_EXCLUDE_COMMENT}\n{_GIT_EXCLUDE_ENTRY}\n"
+            )
+        return True
+    except (OSError, UnicodeError, subprocess.SubprocessError):
+        return False
 
 
 def _norm(value: str) -> str:
@@ -269,6 +305,7 @@ def main() -> None:
         return
 
     cwd = Path(payload.get("cwd") or ".").resolve()
+    ensure_local_git_exclude(cwd)
     session_id = payload.get("session_id") or ""
     messages = _transcript_messages(payload.get("transcript_path") or "")
     assistant_turns = _assistant_texts(messages)

@@ -22,6 +22,7 @@ project's `.proof` directory.
 import hashlib
 import json
 import re
+import subprocess
 import sys
 import unicodedata
 from datetime import datetime, timezone
@@ -32,6 +33,42 @@ HOOKS_DIR = Path.home() / ".claude" / "hooks"
 DISABLE_FLAG = HOOKS_DIR / f"disable_{HOOK_NAME}.flag"
 
 _DASHES = "[‐‑‒–—−]"
+_GIT_EXCLUDE_ENTRY = ".proof/"
+_GIT_EXCLUDE_COMMENT = "# Citation Proof local evidence (generated; do not commit)"
+
+
+def ensure_local_git_exclude(project_dir: Path) -> bool:
+    """Best-effort local Git protection without editing tracked .gitignore."""
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(project_dir), "rev-parse", "--git-common-dir"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=3,
+            check=False,
+            shell=False,
+        )
+        common = result.stdout.strip()
+        if result.returncode != 0 or not common:
+            return False
+        common_dir = Path(common)
+        if not common_dir.is_absolute():
+            common_dir = (project_dir / common_dir).resolve()
+        exclude = common_dir / "info" / "exclude"
+        existing = exclude.read_text(encoding="utf-8") if exclude.exists() else ""
+        if _GIT_EXCLUDE_ENTRY in {line.strip() for line in existing.splitlines()}:
+            return True
+        exclude.parent.mkdir(parents=True, exist_ok=True)
+        separator = "" if not existing or existing.endswith(("\n", "\r")) else "\n"
+        with exclude.open("a", encoding="utf-8") as handle:
+            handle.write(
+                f"{separator}{_GIT_EXCLUDE_COMMENT}\n{_GIT_EXCLUDE_ENTRY}\n"
+            )
+        return True
+    except (OSError, UnicodeError, subprocess.SubprocessError):
+        return False
 
 
 def _normalize(s: str) -> str:
@@ -92,9 +129,10 @@ def main() -> None:
     ts = datetime.now(timezone.utc).isoformat()
     session_id = payload.get("session_id", "") or ""
     entry = make_log_entry(url, _text_of(payload.get("tool_response")), ts, session_id)
-    cwd = payload.get("cwd") or "."
+    cwd = Path(payload.get("cwd") or ".").resolve()
     try:
-        proof = Path(cwd) / ".proof"  # fixed file under cwd/.proof only
+        ensure_local_git_exclude(cwd)
+        proof = cwd / ".proof"  # fixed file under cwd/.proof only
         proof.mkdir(parents=True, exist_ok=True)
         with (proof / "sources_seen.jsonl").open("a", encoding="utf-8") as fh:
             fh.write(json.dumps(entry, ensure_ascii=False) + "\n")

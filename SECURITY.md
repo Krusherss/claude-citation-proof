@@ -5,7 +5,10 @@
 Runtime evidence is written to a project's `.proof/` directory. Depending on
 the command options and available tools, that directory can include URLs,
 verbatim quotes, fetched page text, screenshots, HTML archives, and hook logs.
-The repository's `.gitignore` excludes `.proof/` at every depth. Treat the
+The hooks best-effort add `.proof/` to each target repository's private
+`$GIT_COMMON_DIR/info/exclude`, and this repository's `.gitignore` excludes it
+at every depth. These protections apply to untracked files only: they do not
+remove already-tracked evidence or prevent `git add --force`. Treat the
 directory as local evidence, not publishable source code.
 
 Do not use citation URLs containing credentials or private tokens. URL query

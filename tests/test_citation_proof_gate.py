@@ -52,6 +52,48 @@ def test_parse_and_key_ignore_text_fragment():
     )
 
 
+def test_gate_local_git_exclude_is_added_once(tmp_path):
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+
+    assert gate.ensure_local_git_exclude(tmp_path) is True
+    assert gate.ensure_local_git_exclude(tmp_path) is True
+
+    exclude = (tmp_path / ".git" / "info" / "exclude").read_text(encoding="utf-8")
+    assert exclude.splitlines().count(".proof/") == 1
+
+
+def test_gate_git_exclude_uses_common_dir_for_linked_worktree(tmp_path):
+    repository = tmp_path / "repository"
+    linked = tmp_path / "linked"
+    subprocess.run(["git", "init", "-q", str(repository)], check=True)
+    (repository / "tracked.txt").write_text("baseline\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(repository), "add", "tracked.txt"], check=True)
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(repository),
+            "-c",
+            "user.name=Citation Proof Tests",
+            "-c",
+            "user.email=tests@example.invalid",
+            "commit",
+            "-qm",
+            "baseline",
+        ],
+        check=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(repository), "worktree", "add", "-q", str(linked)],
+        check=True,
+    )
+
+    assert gate.ensure_local_git_exclude(linked) is True
+
+    exclude = (repository / ".git" / "info" / "exclude").read_text(encoding="utf-8")
+    assert exclude.splitlines().count(".proof/") == 1
+
+
 def test_manifest_present_passes():
     text = 'Src: https://example.com/page\nQuote: "Exact quote"'
     key = gate.proof_key("https://example.com/page", "Exact quote")

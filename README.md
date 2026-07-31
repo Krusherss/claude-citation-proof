@@ -91,8 +91,17 @@ python scripts/cite_proof.py "https://example.org/report" \
   "The exact wording copied from the source."
 ```
 
-Results are written under `.proof/` and are excluded by this repository's
-`.gitignore`.
+Results are written under `.proof/`. When either Claude Code hook runs inside
+a Git repository, it best-effort adds `.proof/` to that repository's private
+`$GIT_COMMON_DIR/info/exclude` file. This does not edit a tracked `.gitignore`,
+and repeated runs do not duplicate the entry.
+
+As defense in depth, add this to every target project's `.gitignore`:
+
+```gitignore
+.proof/
+**/.proof/
+```
 
 ## Configure Claude Code
 
@@ -113,9 +122,15 @@ their input also contains an HTTP(S) `url` field.
 ## Privacy and repository safety
 
 `.proof/` can contain raw URLs, query strings, quotes, page text, screenshots,
-HTML archives, and local session identifiers. Never commit it. The supplied
-`.gitignore` excludes `.proof/` at every depth, but still inspect the complete
+HTML archives, and local session identifiers. Never commit it. Automatic local
+exclusion protects untracked evidence in Git repositories, while the supplied
+`.gitignore` protects this repository itself. Neither mechanism removes
+already-tracked files or prevents an explicit forced add. Inspect the complete
 outgoing Git history before publishing.
+
+[`SOURCE_PARITY.json`](SOURCE_PARITY.json) records how the public files map to
+the proven local implementation, including the hashes observed for this release
+and every intentional public-only transformation.
 
 Current behavior preserves the original mechanism: screenshot capture and
 `noimg` HTML archive attempts are enabled by default. Rendered-DOM verification
