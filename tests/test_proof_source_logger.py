@@ -1,4 +1,5 @@
 import importlib.util
+import subprocess
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -20,3 +21,26 @@ def test_log_entry_hash_is_reflow_invariant():
     second = logger.make_log_entry("https://example.com", "one two", "now", "s1")
     assert first["normalized_text_hash"] == second["normalized_text_hash"]
     assert first["session_id"] == "s1"
+
+
+def test_local_git_exclude_is_added_once(tmp_path):
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+
+    assert logger.ensure_local_git_exclude(tmp_path) is True
+    assert logger.ensure_local_git_exclude(tmp_path) is True
+
+    exclude = (tmp_path / ".git" / "info" / "exclude").read_text(encoding="utf-8")
+    assert exclude.splitlines().count(".proof/") == 1
+    ignored = subprocess.run(
+        ["git", "-C", str(tmp_path), "check-ignore", "-q", ".proof/probe.json"],
+        check=False,
+    )
+    assert ignored.returncode == 0
+
+
+def test_local_git_exclude_fails_open_on_non_utf8_file(tmp_path):
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    exclude = tmp_path / ".git" / "info" / "exclude"
+    exclude.write_bytes(b"\xff\xfe\x00")
+
+    assert logger.ensure_local_git_exclude(tmp_path) is False

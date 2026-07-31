@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "observed_date": "2026-07-31",
+  "scope": "Citation Proof public source-accountability components only",
+  "policy": "Preserve proven local logic unless a listed public-release transformation is required.",
+  "files": [
+    {
+      "public_path": "scripts/cite_proof.py",
+      "public_sha256": "ad87ae26e69e4a4f9adeed7f7dd1ad297cb04d792707be33cb872b22468e8f5e",
+      "canonical_path": "~/.claude/scripts/cite_proof.py",
+      "canonical_sha256": "28d6e37c18bf69b7249683be4be33883087d780fa8655ed031eb99da9bfc6ee3",
+      "parity": "operational logic preserved",
+      "allowed_transformations": [
+        "Remove a private task identifier from the module documentation.",
+        "Describe the implemented viewport screenshot behavior instead of the stale full-page wording in the local documentation."
+      ]
+    },
+    {
+      "public_path": "hooks/proof_source_logger.py",
+      "public_sha256": "edb2173dfb1f2428c4af82867a9cbbfa1da4ba39b2abf1edf52ccb51dd02b26e",
+      "canonical_path": "~/.claude/hooks/proof_source_logger.py",
+      "canonical_sha256": "574a202b1d7651a26d189d9045e4be51338b93d34319f3b858ff3ec63bd9f777",
+      "parity": "proven logger core preserved with a public-only safety addition",
+      "allowed_transformations": [
+        "Replace private hook-creator task annotations with public safety documentation.",
+        "Resolve the hook cwd to a Path before writing evidence.",
+        "Best-effort addition of .proof/ to the repository-local Git exclude file."
+      ]
+    },
+    {
+      "public_path": "hooks/citation_proof_gate.py",
+      "public_sha256": "dbc5472bf7375b39b03f8ffc43df7604d27d4c468d52a548f5c478d48d5ae855",
+      "canonical_path": "~/.claude/hooks/proof_gate.py",
+      "canonical_sha256": "b9f2a3285554d608018ff5585245ffabaa5adf2011899f011def3aa3df97bb5b",
+      "parity": "intentional scoped extraction",
+      "allowed_transformations": [
+        "Keep only citation parsing, manifest verification, per-session source accountability, proof spawning, and warn-or-block behavior.",
+        "Omit unrelated private assertion judges, watchers, transcript memory, workspace oracles, and private global configuration.",
+        "Best-effort addition of .proof/ to the repository-local Git exclude file."
+      ]
+    }
+  ]
+}
