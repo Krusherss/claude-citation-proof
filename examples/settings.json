@@ -1,0 +1,27 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "WebFetch|WebSearch|mcp__.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python /absolute/path/to/claude-citation-proof/hooks/proof_source_logger.py",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python /absolute/path/to/claude-citation-proof/hooks/citation_proof_gate.py",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}
