@@ -21,7 +21,10 @@ enforcement through its `PostToolUse` and `Stop` hook events.
 For a URL and an expected verbatim quote, `scripts/cite_proof.py` builds a local
 evidence record with:
 
-- a W3C text-fragment deep link;
+- a W3C text-fragment deep link: a single-part fragment carrying the full
+  quote by default, or a page-generated fragment (via `text-fragments-polyfill`
+  and `jsdom`, matching what the browser's own algorithm would emit) when the
+  optional Node helper and its dependencies are available;
 - a deterministic `present`, `absent`, or `unreadable` verdict;
 - served HTML or PDF text checking;
 - rendered-DOM checking through a fresh Playwright browser context;
@@ -77,6 +80,9 @@ standard library. Optional features need extra tools:
 python -m pip install -e ".[test,browser,pdf]"
 python -m playwright install chromium
 npm install -g single-file-cli
+
+# Optional: page-generated fragment deep links (installs into scripts/node_modules)
+npm install --prefix scripts
 ```
 
 `playwright` enables rendered-DOM verification and screenshots. `PyMuPDF`

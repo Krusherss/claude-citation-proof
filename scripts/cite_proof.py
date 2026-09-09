@@ -8,7 +8,7 @@ link-rot-proof bundle of evidence and record an honest verdict:
                   jumps to and highlights the quote on the live page.
   2. screenshot — Playwright loads the page, paints the highlight with injected
                   JS (headless Chromium does NOT apply #:~:text= itself), and
-                  saves a viewport JPEG q70 to .proof/shots/<hash>.jpg.
+                  saves a full-page JPEG q70 to .proof/shots/<hash>.jpg.
   3. archive    — SingleFile CLI snapshots the page to .proof/archive/<hash>.html
                   (default --block-images, ~150 KB; "full" keeps images).
   4. wayback    — optional ~0-byte third-party witness URL (web.archive.org).
@@ -34,7 +34,7 @@ USAGE
 
 Defaults: --archive noimg, --wayback off, cache ON (TTL 24 h), re-anchor ON.
 
-Page text is read through a shared URL-level cache
+t564 items 2+3: page text is read through a shared URL-level cache
 (.proof/url_cache/) so repeat quotes against the same page never re-fetch or
 re-archive it; a verdict=absent quote triggers ONE re-anchor retry that proves
 the best verbatim page snippet instead (original absent record kept as the
@@ -52,6 +52,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 import unicodedata
 import urllib.request
@@ -71,7 +72,7 @@ _INTERSTITIAL = ("checking your browser", "not automatically redirected",
 
 # Injected highlight JS — VISUAL-ONLY (paints the spot for the screenshot; never
 # decides the verdict; that is decide_verdict's job on verbatim text). Adapted
-# from the DRUGSHEET4ED reference (_clicktest_shot.py): unicode-dash + whitespace
+# from an earlier screenshot-verification script: unicode-dash + whitespace
 # normalization, tree-walker then block-element fallback, scrollIntoView. Headless
 # page.goto ignores #:~:text=, so we paint it ourselves. The leading-span shrink
 # is FLOORED at ~20 chars (whole quote if shorter) so it can never collapse to a
@@ -227,11 +228,51 @@ def frag_component(text: str) -> str:
     return urlq(text, safe="").replace("-", "%2D")
 
 
-def deeplink_for(quote: str, url: str) -> str:
-    """Build url#:~:text=start,end (W3C Text Fragment). Whole quote if <=8 words,
-    else first5,last5. frag_component percent-encodes the chars the grammar
-    reserves inside each half (',' '&' '-'); the single literal ',' between the
-    two halves stays raw as the range separator.
+def deeplink_for(quote: str, url: str, *, html: str = None,
+                 timeout: float = None) -> str:
+    """Build url#:~:text=<fragment> (W3C Text Fragment). ALWAYS single-part.
+
+    B3 (t870): when `html` is supplied — the page body cite_proof now persists
+    (t871) — the fragment is GENERATED FROM THE PAGE by Chrome's own generator
+    (see fragment_from_page) instead of being typed out of the quote, which is
+    what closes t786's folded-character class at the root. Without a body, or on
+    any generation failure, this falls back to the whole-quote form below and
+    behaves exactly as it did before.
+
+    t839: this used to emit `first5,last5` for any quote over 8 words. That
+    two-part RANGE is the source of two shipped defect classes, and both are
+    UNREACHABLE for a single-part fragment — which is why the split is deleted
+    rather than patched:
+
+      OVERLAP (t799). A browser searches for textEnd only AFTER textStart's
+      match ENDS. At exactly nine words w[:5] and w[-5:] SHARE a word, so
+      textEnd never occurs after textStart ends and no range can match. The
+      link is dead on arrival while `present`, the substring audit and the byte
+      audit all pass — not one of them models range semantics.
+
+      RUNAWAY RANGE (t813). textStart resolves against its FIRST occurrence on
+      the page. When those five words appear earlier, the highlight starts at
+      the wrong hit and runs all the way to textEnd, covering a block of
+      unrelated text. One shipped link resolved 3,738 chars from 78 chars of
+      anchor (47x); another 13,229 from 54 (244x).
+
+    A whole-quote fragment has no textEnd to overlap, and its range IS the
+    quote, so it can only mis-land if the ENTIRE quote repeats on the page —
+    and then both hits say the same thing. Evidence the classes were live, not
+    theoretical: one 65-link client deliverable shipped 4 overlaps + 2
+    runaways.
+
+    NO LENGTH CAP, deliberately. Single-part fragments are longer, and the
+    obvious "cap it" reflex would truncate the quote — which silently fails to
+    match, i.e. re-introduces the exact defect class this removes. Browsers
+    handle multi-kilobyte URLs; a proof quote is ~200 chars.
+
+    SECURITY (A03, per cheatsheetseries.owasp.org Python Security Cheat Sheet):
+    `quote` is EXTERNAL INPUT (argv, page text). frag_component percent-encodes
+    every char the grammar reserves inside a component (',' '&' '-'), so text
+    cannot inject fragment directives. With the range separator gone the
+    fragment now contains NO raw comma at all, which is strictly safer than the
+    two-part form it replaces (t811).
 
     t597: drop the WHOLE fragment here — not just a pre-existing '#:~:text='
     (strip_fragment's job) — because a surviving '#section' anchor would collide
@@ -240,12 +281,129 @@ def deeplink_for(quote: str, url: str) -> str:
     this human-facing deeplink strips it."""
     parts = urlsplit(url)
     clean = urlunsplit((parts.scheme, parts.netloc, parts.path, parts.query, ""))
-    w = quote.split()
-    if len(w) <= 8:
-        frag = frag_component(quote)
-    else:
-        frag = frag_component(" ".join(w[:5])) + "," + frag_component(" ".join(w[-5:]))
-    return f"{clean}#:~:text={frag}"
+    if html:
+        generated = fragment_from_page(
+            quote, url, html,
+            timeout=FRAGMENT_TIMEOUT_DEFAULT if timeout is None else timeout)
+        if generated:
+            return f"{clean}{generated}"
+    return f"{clean}#:~:text={frag_component(quote)}"
+
+
+# --------------------------------------------------------------------------- #
+# 1b. Fragment generated FROM THE PAGE (B3, t870/t871/t872)                    #
+# --------------------------------------------------------------------------- #
+# t786, four times over: a quote proven `present` is not yet a link that works.
+# match_norm folds the dash family and the quote family, so a quote typed with
+# ASCII '-' or a straight apostrophe proves present against a page serving
+# U+2013 / U+2019 — and the deeplink above then ships THE TYPED QUOTE's
+# characters, which Chromium (folding neither) cannot find. Every presence check
+# stays green while the link highlights nothing. Shortening anchors by hand
+# fixed instances and never the class.
+#
+# The structural fix: locate the quote in the page's own DOM and let Chrome's
+# generator build the fragment out of PAGE bytes. The typed quote then never
+# reaches the URL, so no folding it survived can leak into a link.
+#
+# ADOPT-CHECK: adopt text-fragments-polyfill 6.7.0 (GoogleChromeLabs — the code
+# Chromium iOS and the Link-to-Text extension ship) + jsdom 29.1.1. Surface read
+# from the installed source, not from docs about it: setTimeout (line 36),
+# GenerateFragmentStatus (43), generateFragmentFromRange (78).
+#
+# EVERY failure path falls back to the whole-quote deeplink above. A generation
+# that fails must degrade to the old behaviour, never to a fabricated link.
+
+FRAGMENT_TIMEOUT_DEFAULT = 60.0  # seconds per page — see the 8.8 MB XBRL note
+# Cost guard, NOT a correctness control — the timeout below is the correctness
+# control and it was MEASURED working (a 5 s budget against the 8.8 MB body
+# returns None in 5.1 s leaving no surviving child; the process count that first
+# looked like a leak was unrelated node processes, this environment's own).
+# This exists because parse cost is not linear in body size: a 1.9 MB page
+# generates in ~4 s while Apollo's 8.8 MB XBRL 10-K did not finish in SEVEN
+# MINUTES. Without the guard every quote on such a page burns the whole timeout
+# to fail. An over-cap body falls back to the whole-quote deeplink at once —
+# which is what it would have done after the timeout anyway.
+_FRAGMENT_MAX_BODY_CHARS = 5_000_000
+_FRAGMENT_HELPER = Path(__file__).resolve().parent / "fragment_from_page.mjs"
+
+
+def serialize_fragment(frag: dict) -> str:
+    """`#:~:text=[prefix-,]textStart[,textEnd][,-suffix]` from the generator's
+    parts. Every component goes through frag_component, so a ',' '&' or '-' in
+    PAGE TEXT is percent-encoded and cannot become a second directive (t811) —
+    the page is external input and the fragment grammar is an injection surface
+    like any other."""
+    start = (frag.get("textStart") or "").strip()
+    if not start:
+        return ""
+    parts = []
+    if frag.get("prefix"):
+        parts.append(frag_component(frag["prefix"]) + "-")
+    parts.append(frag_component(start))
+    if frag.get("textEnd"):
+        parts.append(frag_component(frag["textEnd"]))
+    if frag.get("suffix"):
+        parts.append("-" + frag_component(frag["suffix"]))
+    return "#:~:text=" + ",".join(parts)
+
+
+def fragment_from_page(quote: str, url: str, html: str, *,
+                       timeout: float = FRAGMENT_TIMEOUT_DEFAULT):
+    """The `#:~:text=...` fragment Chrome's generator builds for `quote` over
+    `html`, or None if anything at all goes wrong.
+
+    The quote and the body travel in a temp JSON file, NEVER in argv: both are
+    external input, and a command line is the wrong place for either. The helper
+    is invoked with list-form argv and shell=False.
+
+    TWO CLOCKS on purpose. The helper sets the library's own budget, and this
+    subprocess timeout survives a wedge the library cannot see — the spike's
+    8.8 MB Apollo XBRL body did not finish in seven minutes while a 1.9 MB page
+    took four seconds. Parse cost is not linear in body size, so a timeout is
+    required, not a precaution."""
+    if not html or not quote or not _FRAGMENT_HELPER.exists():
+        return None
+    if len(html) > _FRAGMENT_MAX_BODY_CHARS:
+        print(f"  [fragment-gen] body {len(html)//1_000_000} MB over the "
+              f"{_FRAGMENT_MAX_BODY_CHARS // 1_000_000} MB parse guard — "
+              "falling back", file=sys.stderr)
+        return None
+    node = shutil.which("node")
+    if not node:
+        return None
+    tmpdir = tempfile.mkdtemp(prefix="frag_gen_")
+    try:
+        body_path = os.path.join(tmpdir, "body.html")
+        job_path = os.path.join(tmpdir, "job.json")
+        with open(body_path, "w", encoding="utf-8") as fh:
+            fh.write(html)
+        with open(job_path, "w", encoding="utf-8") as fh:
+            json.dump({"url": url, "quote": quote, "htmlPath": body_path,
+                       "timeoutMs": int(max(1.0, timeout) * 1000)}, fh)
+        try:
+            proc = subprocess.run(  # nosec B603  # nosemgrep: list argv, shell=False, no user text in argv
+                [node, str(_FRAGMENT_HELPER), job_path],
+                capture_output=True, text=True, encoding="utf-8", timeout=timeout, shell=False)
+        except Exception as e:  # timeout, node missing mid-flight, OS refusal
+            print(f"  [fragment-gen] {type(e).__name__}: {str(e)[:80]}",
+                  file=sys.stderr)
+            return None
+        try:
+            res = json.loads(proc.stdout or "{}")
+        except Exception:
+            print("  [fragment-gen] helper output was not JSON — falling back",
+                  file=sys.stderr)
+            return None
+        if not isinstance(res, dict) or not res.get("ok"):
+            why = (res or {}).get("error") if isinstance(res, dict) else "no output"
+            print(f"  [fragment-gen] {why} — falling back", file=sys.stderr)
+            return None
+        frag = res.get("fragment")
+        if not isinstance(frag, dict):
+            return None
+        return serialize_fragment(frag) or None
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
 
 
 # --------------------------------------------------------------------------- #
@@ -376,9 +534,23 @@ def capture_screenshot(url: str, quote: str, out_path: Path):
 # --------------------------------------------------------------------------- #
 
 def fetch_text(url: str):
-    """Return (text, mode). Raw HTTP fetch — survives hosts whose *visual*
-    render is bot-walled but whose *served* HTML/PDF text is not. PDF -> text via
-    PyMuPDF (if available); else HTML tag-stripped. mode in {"html","pdf"}.
+    """Return (text, mode, raw_html). Raw HTTP fetch — survives hosts whose
+    *visual* render is bot-walled but whose *served* HTML/PDF text is not.
+    PDF -> text via PyMuPDF (if available); else HTML tag-stripped.
+    mode in {"html","pdf"}; raw_html is the HTML source in mode="html" and None
+    for PDF, which has no markup to give.
+
+    t871: this used to return (text, mode) and THROW THE BODY AWAY, so the URL
+    cache held tag-stripped text only. A W3C text fragment must be generated
+    from a DOM Range over the real markup (Chrome's generator takes a Range),
+    and there was no body on disk to build one from — only the SingleFile
+    archive, present for 29 of 41 cached URLs here and an EMPTY FILE for
+    PDF-mode entries. That absence, not the algorithm, is what blocked B3.
+
+    CALLERS MUST TOLERATE A 2-TUPLE — unpack via unpack_fetch(), never by
+    shape. The test suite monkeypatches this function with (text, mode) fakes
+    whose whole job is to make a live fetch loud; a fake that no longer matches
+    the call site is a fake that lets the network through silently.
 
     Scheme guard (security): only http(s); refuse file:// and friends."""
     if not re.match(r"https?://", url):
@@ -390,12 +562,18 @@ def fetch_text(url: str):
     if "pdf" in ct or url.lower().endswith(".pdf"):
         import fitz  # PyMuPDF — optional
         doc = fitz.open(stream=body, filetype="pdf")
-        return " ".join(str(page.get_text()) for page in doc), "pdf"
-    txt = body.decode("utf-8", "replace")
-    txt = re.sub(r"(?is)<(script|style)[^>]*>.*?</\1>", " ", txt)
+        return " ".join(str(page.get_text()) for page in doc), "pdf", None
+    raw = body.decode("utf-8", "replace")
+    txt = re.sub(r"(?is)<(script|style)[^>]*>.*?</\1>", " ", raw)
     txt = re.sub(r"<[^>]+>", " ", txt)
     import html as _html
-    return _html.unescape(txt), "html"
+    return _html.unescape(txt), "html", raw
+
+
+def unpack_fetch(res):
+    """(text, mode, raw_html) from whatever fetch_text returned, tolerating the
+    legacy 2-tuple a monkeypatched fake gives back. See fetch_text's contract."""
+    return res[0], res[1], (res[2] if len(res) > 2 else None)
 
 
 def served_text_has_quote(url: str, quote: str):
@@ -405,7 +583,7 @@ def served_text_has_quote(url: str, quote: str):
     reachable=False means the served-text channel itself failed (network, scheme,
     PDF lib missing) — distinct from "reached the page but the quote was absent"."""
     try:
-        text, _ = fetch_text(url)
+        text = unpack_fetch(fetch_text(url))[0]
     except Exception as e:
         print(f"  [served-text] fetch failed: {type(e).__name__}: "
               f"{str(e)[:80]}", file=sys.stderr)
@@ -447,12 +625,36 @@ def decide_verdict(served_found: bool, served_reachable: bool,
 
 URL_CACHE_TTL_DEFAULT = 86400  # seconds; cached served text is trusted for 24 h
 _URL_CACHE_TEXT_CAP = 2_000_000  # chars; refuse to cache pathological pages
+# t871: the raw body lives in a SIDECAR FILE, not in the JSON entry. Bodies here
+# run to 8.8 MB (Apollo's XBRL 10-K); inside the entry they would blow the text
+# cap above and be re-serialized on every field merge. The cap is generous
+# because the whole point is to keep the big ones — the cost of a body too large
+# to store is a fragment that cannot be generated for that page ever again.
+_URL_CACHE_HTML_CAP = 25_000_000  # chars
 
 
 def url_cache_path(proof_dir: Path, url: str) -> Path:
     """.proof/url_cache/<sha256(canon_url)>.json — URL-level, quote-independent."""
     h = hashlib.sha256(canon_url(url).encode("utf-8")).hexdigest()
     return proof_dir / "url_cache" / f"{h}.json"
+
+
+def url_html_path(proof_dir: Path, url: str) -> Path:
+    """.proof/url_cache/<sha256(canon_url)>.src.html — the raw body sidecar
+    (t871). Named off the SAME hash as the entry, so the pair cannot drift."""
+    h = hashlib.sha256(canon_url(url).encode("utf-8")).hexdigest()
+    return proof_dir / "url_cache" / f"{h}.src.html"
+
+
+def cached_html(proof_dir: Path, url: str):
+    """The stored raw body for this URL, or None. Fail-open like the rest of the
+    cache: a missing or unreadable sidecar is a MISS, never an error — the
+    fragment generator simply falls back to the whole-quote deeplink."""
+    try:
+        p = url_html_path(proof_dir, url)
+        return p.read_text(encoding="utf-8") if p.exists() else None
+    except Exception:
+        return None
 
 
 def load_url_cache(proof_dir: Path, url: str, ttl: float):
@@ -471,14 +673,22 @@ def load_url_cache(proof_dir: Path, url: str, ttl: float):
 
 
 def update_url_cache(proof_dir: Path, url: str, *, text=None, mode=None,
-                     archive=None) -> None:
+                     archive=None, html=None) -> None:
     """Merge fields into the URL's cache entry atomically (tempfile+os.replace;
     no lock — concurrent writers fetched the same page, last-writer-wins is
-    safe). `text` refreshes the entry and its fetched_at clock; `archive` merges
-    WITHOUT touching the clock (text age governs freshness) so the URL's one
-    archive is reused, never re-captured, by later quotes against the page."""
+    safe). `text` refreshes the entry and its fetched_at clock; `archive` and
+    `html` merge WITHOUT touching the clock (text age governs freshness) so the
+    URL's one archive and one body are reused, never re-captured, by later
+    quotes against the page.
+
+    t871: `html` is written to a sidecar file (url_html_path) and only its PATH
+    is recorded in the entry — see _URL_CACHE_HTML_CAP for why it is not inlined.
+    Over-cap bodies are silently not stored, exactly like over-cap text: the
+    caller's fallback is a working deeplink, not an error."""
     if text is not None and len(text) > _URL_CACHE_TEXT_CAP:
         return
+    if html is not None and len(html) > _URL_CACHE_HTML_CAP:
+        html = None
     p = url_cache_path(proof_dir, url)
     try:
         prior = {}
@@ -502,6 +712,16 @@ def update_url_cache(proof_dir: Path, url: str, *, text=None, mode=None,
         if not entry.get("text"):
             return  # nothing useful to keep (archive alone can't seed an entry)
         p.parent.mkdir(parents=True, exist_ok=True)
+        if html is not None:
+            # Same atomic discipline as the entry: a half-written body would be
+            # parsed by jsdom as a truncated document and generate a fragment
+            # for text the page does not carry.
+            hp = url_html_path(proof_dir, url)
+            htmp = hp.parent / f"{hp.name}.tmp.{os.getpid()}"
+            htmp.write_text(html, encoding="utf-8")
+            os.replace(htmp, hp)
+            entry["html"] = str(hp)
+            entry["html_chars"] = len(html)
         tmp = p.parent / f"{p.name}.tmp.{os.getpid()}"
         tmp.write_text(json.dumps(entry), encoding="utf-8")
         os.replace(tmp, p)
@@ -798,13 +1018,17 @@ def build_proof(url: str, quote: str, proof_dir: Path,
     shots_dir.mkdir(parents=True, exist_ok=True)
     archive_dir.mkdir(parents=True, exist_ok=True)
 
-    deeplink = deeplink_for(quote, url)
     shot_path = shots_dir / f"{key}.jpg"
     arch_path = archive_dir / f"{key}.html"
 
     cached = load_url_cache(proof_dir, url, cache_ttl) if use_cache else None
     served_text = cached["text"] if cached else None
     dom_text = ""
+    # B3: the deeplink is built AFTER the body is in hand, because the fragment
+    # is now generated from the PAGE rather than typed from the quote. The
+    # cached sidecar covers the fast path (no fetch this run) and raw_html the
+    # live one; with neither, deeplink_for falls back to the whole-quote form.
+    page_html = cached_html(proof_dir, url) if use_cache else None
 
     fast_path = bool(
         served_text and match_norm(quote) in match_norm(served_text))
@@ -825,10 +1049,11 @@ def build_proof(url: str, quote: str, proof_dir: Path,
         # for a live fetch; a live fetch refreshes the cache for the next quote.
         if served_text is None:
             try:
-                served_text, text_mode = fetch_text(url)
+                served_text, text_mode, raw_html = unpack_fetch(fetch_text(url))
+                page_html = raw_html or page_html
                 if use_cache:
-                    update_url_cache(proof_dir, url,
-                                     text=served_text, mode=text_mode)
+                    update_url_cache(proof_dir, url, text=served_text,
+                                     mode=text_mode, html=raw_html)
             except Exception as e:
                 print(f"  [served-text] fetch failed: {type(e).__name__}: "
                       f"{str(e)[:80]}", file=sys.stderr)
@@ -837,6 +1062,7 @@ def build_proof(url: str, quote: str, proof_dir: Path,
         served_found = bool(
             served_text and match_norm(quote) in match_norm(served_text))
     screenshot_field = str(shot_path) if shot_path.exists() else None
+    deeplink = deeplink_for(quote, url, html=page_html)
 
     # Verbatim presence (rendered OR served) is the SOLE verdict authority.
     verdict = decide_verdict(served_found, served_reachable,

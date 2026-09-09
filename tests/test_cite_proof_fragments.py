@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Tests for deeplink_for() double-'#' handling on section anchors.
+"""Tests for cite_proof.py t597 — deeplink_for() double-'#' on section anchors.
 
-deeplink_for() calls strip_fragment(),
+BUG (observed 2026-07-17, sid 371621d5): deeplink_for() calls strip_fragment(),
 which by design strips only a pre-existing '#:~:text=' fragment and KEEPS a real
 '#section' anchor. So for a URL cited by section anchor (the normal way to cite
 API docs) it appends its own '#:~:text=' AFTER the surviving anchor, producing

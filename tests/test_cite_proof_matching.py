@@ -1,17 +1,18 @@
 #!/usr/bin/env python3
-"""Tests for cite_proof.py matcher normalization axes.
+"""Tests for cite_proof.py t582 — the remaining matcher axes.
 
-PDF de-hyphenation and ligature folding are pinned in the cache/re-anchor tests.
-These tests cover two additional axes:
+Session 5e3ad23b landed PDF de-hyphenation + ligature folding (pinned in
+test_cite_proof_t564.py). The t582 fix spec also names two
+axes that were still live (verified failing 2026-07-16, sid this file):
 
   1. CURLY QUOTES — a transcription writes ASCII '/" while the page serves
      U+2018/2019/201C/201D (or vice versa): verdict flips absent while true.
-     (Ed HedgeFund re-anchor cases fund-03/13.)
+     (hedge-fund report re-anchor cases fund-03/13.)
   2. TAG-BOUNDARY SPACES — fetch_text replaces HTML tags with a space, so
      inline markup (<sup>1</sup>, XBRL spans, tag-broken parens) injects
      spaces the rendered page never shows: a quote copied from the rendered
      page returns absent against the served text.
-     (Ed HedgeFund re-anchor cases fund-03/04; Apollo 10-K XBRL.)
+     (hedge-fund report re-anchor cases fund-03/04; Apollo 10-K XBRL.)
 
 Both folds are PRESENCE-CHECK ONLY: keying (canon_quote/proof_key) must stay
 byte-for-byte in lockstep with proof_gate.py — pinned below.

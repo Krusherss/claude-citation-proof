@@ -1,0 +1,10 @@
+{
+  "name": "claude-citation-proof-fragment-helper",
+  "private": true,
+  "description": "Optional Node dependencies for fragment_from_page.mjs. Without them cite_proof falls back to the whole-quote deeplink.",
+  "type": "module",
+  "dependencies": {
+    "jsdom": "29.1.1",
+    "text-fragments-polyfill": "6.7.0"
+  }
+}

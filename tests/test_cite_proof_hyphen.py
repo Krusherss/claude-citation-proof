@@ -42,17 +42,24 @@ class HyphenEncoding(unittest.TestCase):
         self.assertNotIn("-", frag(link))
         self.assertIn("%2D", frag(link))
 
-    def test_long_quote_hyphen_encoded_in_both_halves(self):
+    def test_long_quote_hyphen_encoded_throughout(self):
+        # t839: the fragment is single-part now, so there are no halves to
+        # check separately -- the hyphen rule applies to the whole span, and
+        # the hyphens in the MIDDLE of the quote are covered too, which the
+        # old first5/last5 assertion could never see.
         q = ("The estimated average out-of-pocket cost per approved new "
              "compound is a well-known figure of 1395 million dollars")
-        start, end = frag(deeplink_for(q, URL)).split(",")
-        self.assertNotIn("-", start)
-        self.assertNotIn("-", end)
+        f = frag(deeplink_for(q, URL))
+        self.assertNotIn("-", f)
+        self.assertEqual(f.count("%2D"), 3)  # out-of-pocket x2, well-known x1
 
-    def test_range_separator_comma_survives(self):
+    def test_no_range_separator_is_emitted(self):
+        # t839 REVERSES this test's original assertion. It used to require
+        # exactly one raw ',' as the textStart,textEnd separator; that range is
+        # the whole t799/t813 defect surface, so a raw ',' is now a bug.
         q = ("one two three four five six seven eight nine ten eleven "
              "twelve thirteen fourteen")
-        self.assertEqual(frag(deeplink_for(q, URL)).count(","), 1)
+        self.assertEqual(frag(deeplink_for(q, URL)).count(","), 0)
 
     def test_comma_inside_text_stays_encoded(self):
         self.assertIn("%2C", frag(deeplink_for("class (i.e., non-founders)", URL)))

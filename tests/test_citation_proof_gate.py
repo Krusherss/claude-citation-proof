@@ -1,5 +1,6 @@
 import importlib.util
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -52,8 +53,11 @@ def test_parse_and_key_ignore_text_fragment():
     )
 
 
+_HERMETIC_ENV = {**os.environ, "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_SYSTEM": os.devnull}
+
+
 def test_gate_local_git_exclude_is_added_once(tmp_path):
-    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True, env=_HERMETIC_ENV)
 
     assert gate.ensure_local_git_exclude(tmp_path) is True
     assert gate.ensure_local_git_exclude(tmp_path) is True
@@ -65,9 +69,9 @@ def test_gate_local_git_exclude_is_added_once(tmp_path):
 def test_gate_git_exclude_uses_common_dir_for_linked_worktree(tmp_path):
     repository = tmp_path / "repository"
     linked = tmp_path / "linked"
-    subprocess.run(["git", "init", "-q", str(repository)], check=True)
+    subprocess.run(["git", "init", "-q", str(repository)], check=True, env=_HERMETIC_ENV)
     (repository / "tracked.txt").write_text("baseline\n", encoding="utf-8")
-    subprocess.run(["git", "-C", str(repository), "add", "tracked.txt"], check=True)
+    subprocess.run(["git", "-C", str(repository), "add", "tracked.txt"], check=True, env=_HERMETIC_ENV)
     subprocess.run(
         [
             "git",
@@ -82,10 +86,12 @@ def test_gate_git_exclude_uses_common_dir_for_linked_worktree(tmp_path):
             "baseline",
         ],
         check=True,
+        env=_HERMETIC_ENV,
     )
     subprocess.run(
         ["git", "-C", str(repository), "worktree", "add", "-q", str(linked)],
         check=True,
+        env=_HERMETIC_ENV,
     )
 
     assert gate.ensure_local_git_exclude(linked) is True
